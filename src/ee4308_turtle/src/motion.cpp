@@ -180,9 +180,6 @@ int main(int argc, char **argv)
 
         geometry_msgs::PoseStamped robot_pose_groundtruth; //for ground truth comparisons
 
-        //publishers to plot the error
-        ros::Publisher linear_error_pub = nh.advertise<std_msgs::Float64>("linear_error",1,true);
-        ros::Publisher angular_error_pub = nh.advertise<std_msgs::Float64>("angular_error",1,true);
         // initialise rate
         ros::Rate rate(motion_iter_rate); // higher rate for better estimation
 
@@ -275,15 +272,8 @@ int main(int argc, char **argv)
             robot_pose.pose.orientation.z = sin(robot_ang / 2);
             pub_pose.publish(robot_pose);
 
-            //ground truth pose from sim odom for comparison
+            //ground truth pose from groundtruth vs motion filter comparison
             robot_pose_groundtruth.pose = msg_odom.pose.pose;
-            /*
-            linear_error and angular_error will be published on
-            /turtle/linear_error and /turtle/angular_error respectively.
-            During the experiments, these topics will be recorded on a .bagfile.
-            These .bagfiles will then be post processed to convert into csv files using: https://github.com/AtsushiSakai/rosbag_to_csv
-            David Faconti's Plotjuggler tool will also be used to visual the graphs based on the data collected: https://github.com/facontidavide/PlotJuggler
-            */
             std_msgs::Float64 linear_error;
             std_msgs::Float64 angular_error;
             auto &q_est = robot_pose.pose.orientation;
@@ -301,8 +291,6 @@ int main(int argc, char **argv)
             double ang_gt = atan2(siny_cosp_gt, cosy_cosp_gt);
             angular_error.data = ang_est - ang_gt; 
 
-            linear_error_pub.publish(linear_error);
-            angular_error_pub.publish(angular_error);
             if (verbose)
             {
                 // ROS_INFO("TMOTION: Pos(%7.3f, %7.3f)  Ang(%6.3f)",
