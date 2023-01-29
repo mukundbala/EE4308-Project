@@ -228,10 +228,10 @@ int main(int argc, char **argv)
             double delta_wheel_r = wheel_r_current - wheel_r_prev; //delta of right wheel rotation
             double linear_velocity_odom = (wheel_radius / (2 * dt)) * (delta_wheel_r + delta_wheel_l); //odometry based linear velocity 
             double angular_velocity_odom = (wheel_radius / (axle_track * dt)) * (delta_wheel_r - delta_wheel_l); //odometry based angular velocity
-        
+            ROS_INFO_STREAM (prog_state << "Linear Vel Odom: " << linear_velocity_odom << " Angular Velocity Odom:" << angular_velocity_odom);
             double linear_velocity_imu = linear_vel + (imu_lin_acc * dt); //sum of the prev linear velocity + linear_acc * dt from imu
             double angular_velocity_imu = imu_ang_vel; //the imu reading for angular velocity
-
+            ROS_INFO_STREAM (prog_state << "Linear Vel IMU: " << linear_velocity_imu << " Angular Velocity IMU:" << angular_velocity_imu);
             double weighted_linear_velocity = (weight_odom_v * linear_velocity_odom) + (weight_imu_v * linear_velocity_imu); //fusing linear velocity measurements with a weighted average (*UPDATE*)
             double weighted_angular_velocity = (weight_odom_w * angular_velocity_odom) + (weight_imu_w * angular_velocity_imu); //fusing angular velocity measurements with a weighted average (*UPDATE*)
             double delta_heading = weighted_angular_velocity * dt; //using the weighted angular velocity * dt to compute the change in heading
