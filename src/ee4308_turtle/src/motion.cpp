@@ -7,6 +7,7 @@
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
 #include <std_msgs/Empty.h>
+#include <std_msgs/Float64.h>
 #include "common.hpp"
 
 //#########global variables that take in data from callbacks#######
@@ -64,10 +65,10 @@ int main(int argc, char **argv)
     bool verbose;
 
     //initial x position
-    double initial_x;
+    double initial_x = 0.0;
 
     //initial y position
-    double initial_y;
+    double initial_y = 0.0;
 
     //Load ROS parameters
     if (!nh.param("use_internal_odom", use_internal_odom, true))
@@ -139,8 +140,8 @@ int main(int argc, char **argv)
     else //we enter this condition when we figure out the pos ourself
     {
         // Parse additional ROS parameters
-
-        //robot position
+        std::string prog_state = "[MotionFilter]:";
+        //robot position @ tiem step t-1 before we compute anything
         Position robot_position(initial_x, initial_y); //set to some initial point
         //self explainatory robot variables set to some initial value to prevent being initialized with rubbish values
         double wheel_radius = 0.033;
@@ -175,7 +176,13 @@ int main(int argc, char **argv)
         // Subscribers
         ros::Subscriber sub_wheels = nh.subscribe("joint_states", 1, &cbWheels);
         ros::Subscriber sub_imu = nh.subscribe("imu", 1, &cbImu);
+        ros::Subscriber sub_odom = nh.subscribe("odom", 1, &cbOdom);
 
+        geometry_msgs::PoseStamped robot_pose_groundtruth; //for ground truth comparisons
+
+        //publishers to plot the error
+        ros::Publisher linear_error_pub = nh.advertise<std_msgs::Float64>("linear_error",1,true);
+        ros::Publisher angular_error_pub = nh.advertise<std_msgs::Float64>("angular_error",1,true);
         // initialise rate
         ros::Rate rate(motion_iter_rate); // higher rate for better estimation
 
@@ -191,46 +198,116 @@ int main(int argc, char **argv)
             ros::spinOnce(); //update the topics
         }
 
-        ROS_INFO("TMOTION: ===== BEGIN =====");
-
-        // declare / initialise other variables
-
-        //angular state of the robot about the z axis. Always starts at 0
-        double robot_ang = 0;
-        //linear velocity
-        double lin_vel = 0;
-        //angular velocity
-        double ang_vel = 0;
+        ROS_INFO("[MotionFilter]: ===== BEGIN =====");
+        
         //time at previous time step
         double prev_time = ros::Time::now().toSec();
         //size of time step
         double dt = 0;
-        ////////////////// DECLARE VARIABLES HERE //////////////////
-
+        //store for left wheel_position @ step t-1
+        double wheel_l_prev = wheel_l;
+        //store for right wheel_position @ step t-1
+        double wheel_r_prev = wheel_r;
+        //store for linear velocity @ step t-1
+        double linear_vel = 0;
+        //store for angular velocity @ step t-1
+        double angular_vel = 0;
+        //store for robot heading @ step t-1
+        double robot_ang = 0;
         while (ros::ok() && nh.param("run", true))
         {
             // update topics
             ros::spinOnce();
-
             dt = ros::Time::now().toSec() - prev_time;
             if (dt == 0) // ros doesn't tick the time fast enough
                 continue;
             prev_time += dt;
 
             ////////////////// MOTION FILTER HERE //////////////////
+            //current left wheel rotation from callback
+            double wheel_l_current = wheel_l; //current left wheel rotation from callback (*UPDATE*)
+            double wheel_r_current = wheel_r; //current right wheel rotation from callback (*UPDATE*)
+            double delta_wheel_l = wheel_l_current - wheel_l_prev; //delta of left wheel rotation
+            double delta_wheel_r = wheel_r_current - wheel_r_prev; //delta of right wheel rotation
+            double linear_velocity_odom = (wheel_radius / (2 * dt)) * (delta_wheel_r + delta_wheel_l); //odometry based linear velocity 
+            double angular_velocity_odom = (wheel_radius / (axle_track * dt)) * (delta_wheel_r - delta_wheel_l); //odometry based angular velocity
+        
+            double linear_velocity_imu = linear_vel + (imu_lin_acc * dt); //sum of the prev linear velocity + linear_acc * dt from imu
+            double angular_velocity_imu = imu_ang_vel; //the imu reading for angular velocity
 
-            // publish the pose
+            double weighted_linear_velocity = (weight_odom_v * linear_velocity_odom) + (weight_imu_v * linear_velocity_imu); //fusing linear velocity measurements with a weighted average (*UPDATE*)
+            double weighted_angular_velocity = (weight_odom_w * angular_velocity_odom) + (weight_imu_w * angular_velocity_imu); //fusing angular velocity measurements with a weighted average (*UPDATE*)
+            double delta_heading = weighted_angular_velocity * dt; //using the weighted angular velocity * dt to compute the change in heading
+            double current_robot_ang = robot_ang + delta_heading; //adding the change in heading to the current robot angle (*UPDATE*)
+
+            double turn_radius = weighted_linear_velocity / weighted_angular_velocity; //turn radius computation using the ratio of weighted linear and angular velocities
+
+            double current_position_x = 0; //(*UPDATE*)
+            double current_position_y = 0; //(*UPDATE*)
+            //note that the robot_position variable stores the previous position at this point in the program (xt-1,yt-1)
+            if (weighted_angular_velocity > straight_thresh) //case where robot is not straight
+            {
+                current_position_x = robot_position.x + (turn_radius * (-sin(robot_ang) + sin(current_robot_ang)));
+                current_position_y = robot_position.y + (turn_radius * (cos(robot_ang) - cos(current_robot_ang)));
+            }
+
+            else //case where robot is straight
+            {
+                current_position_x = robot_position.x + (weighted_linear_velocity * dt * cos(robot_ang));
+                current_position_y = robot_position.y + (weighted_linear_velocity * dt * sin(robot_ang));
+            }
+
+            //prepare for the next time step
+            wheel_l_prev = wheel_l_current;
+            wheel_r_prev = wheel_r_current;
+            linear_vel = weighted_linear_velocity;
+            angular_vel = weighted_angular_velocity;
+            robot_ang = current_robot_ang;
+            robot_position.x = current_position_x;
+            robot_position.y = current_position_y;
+
             // inject position and calculate quaternion for pose message, and publish
             robot_pose.pose.position.x = robot_position.x;
             robot_pose.pose.position.y = robot_position.y;
+            robot_pose.pose.orientation.x = 0;
+            robot_pose.pose.orientation.y = 0;
             robot_pose.pose.orientation.w = cos(robot_ang / 2);
             robot_pose.pose.orientation.z = sin(robot_ang / 2);
             pub_pose.publish(robot_pose);
 
+            //ground truth pose from sim odom for comparison
+            robot_pose_groundtruth.pose = msg_odom.pose.pose;
+            /*
+            linear_error and angular_error will be published on
+            /turtle/linear_error and /turtle/angular_error respectively.
+            During the experiments, these topics will be recorded on a .bagfile.
+            These .bagfiles will then be post processed to convert into csv files using: https://github.com/AtsushiSakai/rosbag_to_csv
+            David Faconti's Plotjuggler tool will also be used to visual the graphs based on the data collected: https://github.com/facontidavide/PlotJuggler
+            */
+            std_msgs::Float64 linear_error;
+            std_msgs::Float64 angular_error;
+            auto &q_est = robot_pose.pose.orientation;
+            auto &q_gt = robot_pose_groundtruth.pose.orientation;
+
+            double diff_x = robot_pose.pose.position.x - robot_pose_groundtruth.pose.position.x;
+            double diff_y = robot_pose.pose.position.y - robot_pose_groundtruth.pose.position.y;
+            linear_error.data = sqrt(diff_x * diff_x + diff_y * diff_y);
+
+            double siny_cosp_est = 2 * (q_est.w * q_est.z + q_est.x * q_est.y);
+            double cosy_cosp_est = 1 - 2 * (q_est.y * q_est.y + q_est.z * q_est.z);
+            double ang_est = atan2(siny_cosp_est, cosy_cosp_est);
+            double siny_cosp_gt = 2 * (q_gt.w * q_gt.z + q_gt.x * q_gt.y);
+            double cosy_cosp_gt = 1 - 2 * (q_gt.y * q_gt.y + q_gt.z * q_gt.z);
+            double ang_gt = atan2(siny_cosp_gt, cosy_cosp_gt);
+            angular_error.data = ang_est - ang_gt; 
+
+            linear_error_pub.publish(linear_error);
+            angular_error_pub.publish(angular_error);
             if (verbose)
             {
-                ROS_INFO("TMOTION: Pos(%7.3f, %7.3f)  Ang(%6.3f)",
-                         robot_position.x, robot_position.y, robot_ang);
+                // ROS_INFO("TMOTION: Pos(%7.3f, %7.3f)  Ang(%6.3f)",
+                //          robot_position.x, robot_position.y, robot_ang);
+                ROS_INFO_STREAM(prog_state << "Linear Error: " << linear_error.data << " Angular Error: " << angular_error.data);
             }
 
             // sleep until the end of the required frequency
