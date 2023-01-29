@@ -274,14 +274,14 @@ int main(int argc, char **argv)
 
             //ground truth pose from groundtruth vs motion filter comparison
             robot_pose_groundtruth.pose = msg_odom.pose.pose;
-            std_msgs::Float64 linear_error;
-            std_msgs::Float64 angular_error;
+            double linear_error;
+            double angular_error;
             auto &q_est = robot_pose.pose.orientation;
             auto &q_gt = robot_pose_groundtruth.pose.orientation;
 
             double diff_x = robot_pose.pose.position.x - robot_pose_groundtruth.pose.position.x;
             double diff_y = robot_pose.pose.position.y - robot_pose_groundtruth.pose.position.y;
-            linear_error.data = sqrt(diff_x * diff_x + diff_y * diff_y);
+            linear_error = sqrt(diff_x * diff_x + diff_y * diff_y);
 
             double siny_cosp_est = 2 * (q_est.w * q_est.z + q_est.x * q_est.y);
             double cosy_cosp_est = 1 - 2 * (q_est.y * q_est.y + q_est.z * q_est.z);
@@ -289,13 +289,13 @@ int main(int argc, char **argv)
             double siny_cosp_gt = 2 * (q_gt.w * q_gt.z + q_gt.x * q_gt.y);
             double cosy_cosp_gt = 1 - 2 * (q_gt.y * q_gt.y + q_gt.z * q_gt.z);
             double ang_gt = atan2(siny_cosp_gt, cosy_cosp_gt);
-            angular_error.data = ang_est - ang_gt; 
+            angular_error = ang_est - ang_gt; 
 
             if (verbose)
             {
                 // ROS_INFO("TMOTION: Pos(%7.3f, %7.3f)  Ang(%6.3f)",
                 //          robot_position.x, robot_position.y, robot_ang);
-                ROS_INFO_STREAM(prog_state << "Linear Error: " << linear_error.data << " Angular Error: " << angular_error.data);
+                ROS_INFO_STREAM(prog_state << "Linear Error: " << linear_error << " Angular Error: " << angular_error);
             }
 
             // sleep until the end of the required frequency
