@@ -226,17 +226,18 @@ int main(int argc, char **argv)
             double wheel_r_current = wheel_r; //current right wheel rotation from callback (*UPDATE*)
             double delta_wheel_l = wheel_l_current - wheel_l_prev; //delta of left wheel rotation
             double delta_wheel_r = wheel_r_current - wheel_r_prev; //delta of right wheel rotation
+            
             double linear_velocity_odom = (wheel_radius / (2 * dt)) * (delta_wheel_r + delta_wheel_l); //odometry based linear velocity 
             double angular_velocity_odom = (wheel_radius / (axle_track * dt)) * (delta_wheel_r - delta_wheel_l); //odometry based angular velocity
-            ROS_INFO_STREAM (prog_state << "Linear Vel Odom: " << linear_velocity_odom << " Angular Velocity Odom:" << angular_velocity_odom);
+
             double linear_velocity_imu = linear_vel + (imu_lin_acc * dt); //sum of the prev linear velocity + linear_acc * dt from imu
             double angular_velocity_imu = imu_ang_vel; //the imu reading for angular velocity
-            ROS_INFO_STREAM (prog_state << "Linear Vel IMU: " << linear_velocity_imu << " Angular Velocity IMU:" << angular_velocity_imu);
+            
             double weighted_linear_velocity = (weight_odom_v * linear_velocity_odom) + (weight_imu_v * linear_velocity_imu); //fusing linear velocity measurements with a weighted average (*UPDATE*)
             double weighted_angular_velocity = (weight_odom_w * angular_velocity_odom) + (weight_imu_w * angular_velocity_imu); //fusing angular velocity measurements with a weighted average (*UPDATE*)
+            
             double delta_heading = weighted_angular_velocity * dt; //using the weighted angular velocity * dt to compute the change in heading
             double current_robot_ang = robot_ang + delta_heading; //adding the change in heading to the current robot angle (*UPDATE*)
-
             double turn_radius = weighted_linear_velocity / weighted_angular_velocity; //turn radius computation using the ratio of weighted linear and angular velocities
 
             double current_position_x = 0; //(*UPDATE*)
@@ -283,6 +284,7 @@ int main(int argc, char **argv)
             double diff_y = robot_pose.pose.position.y - robot_pose_groundtruth.pose.position.y;
             linear_error = sqrt(diff_x * diff_x + diff_y * diff_y);
 
+            //using atan2 from quarternion to find angle
             double siny_cosp_est = 2 * (q_est.w * q_est.z + q_est.x * q_est.y);
             double cosy_cosp_est = 1 - 2 * (q_est.y * q_est.y + q_est.z * q_est.z);
             double ang_est = atan2(siny_cosp_est, cosy_cosp_est);
