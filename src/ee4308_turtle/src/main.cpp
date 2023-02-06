@@ -41,10 +41,13 @@ int main(int argc, char **argv)
     nh.setParam("run", true); // turns off other nodes
 
     // Get ROS parameters
+    bool verbose;
+    if (!nh.param("verbose_main", verbose, true))
+        ROS_WARN(" TMAIN : Param verbose_main not found, set to true");
     if (!nh.param("initial_x", pos_rbt.x, 0.))
-        ROS_WARN(" TMOVE : Param initial_x not found, set to 0");
+        ROS_WARN(" TMAIN : Param initial_x not found, set to 0");
     if (!nh.param("initial_y", pos_rbt.y, 0.))
-        ROS_WARN(" TMOVE : Param initial_x not found, set to 0");
+        ROS_WARN(" TMAIN : Param initial_x not found, set to 0");
     std::vector<Position> goals;
     std::string goal_str;
     if (nh.param("goals", goal_str, std::to_string(pos_rbt.x) + "," + std::to_string(pos_rbt.y)))
@@ -71,41 +74,41 @@ int main(int argc, char **argv)
         }
     }
     else
-        ROS_WARN(" TMOVE : Param goal not found, set to %s", goal_str.c_str());
+        ROS_WARN(" TMAIN : Param goal not found, set to %s", goal_str.c_str());
     Position pos_min;
     if (!nh.param("min_x", pos_min.x, -10.))
-        ROS_WARN(" TMOVE : Param min_x not found, set to -10");
+        ROS_WARN(" TMAIN : Param min_x not found, set to -10");
     if (!nh.param("min_y", pos_min.y, -10.))
-        ROS_WARN(" TMOVE : Param min_y not found, set to -10");
+        ROS_WARN(" TMAIN : Param min_y not found, set to -10");
     Position pos_max;
     if (!nh.param("max_x", pos_max.x, 10.))
-        ROS_WARN(" TMOVE : Param max_x not found, set to 10");
+        ROS_WARN(" TMAIN : Param max_x not found, set to 10");
     if (!nh.param("max_y", pos_max.y, 10.))
-        ROS_WARN(" TMOVE : Param max_y not found, set to 10");
+        ROS_WARN(" TMAIN : Param max_y not found, set to 10");
     double close_enough;
     if (!nh.param("close_enough", close_enough, 0.1))
-        ROS_WARN(" TMOVE : Param close_enough not found, set to 0.1");
+        ROS_WARN(" TMAIN : Param close_enough not found, set to 0.1");
     double target_dt;
     if (!nh.param("target_dt", target_dt, 0.04))
-        ROS_WARN(" TMOVE : Param target_dt not found, set to 0.04");
+        ROS_WARN(" TMAIN : Param target_dt not found, set to 0.04");
     double average_speed;
     if (!nh.param("average_speed", average_speed, 0.2))
-        ROS_WARN(" TMOVE : Param average_speed not found, set to 0.2");
+        ROS_WARN(" TMAIN : Param average_speed not found, set to 0.2");
     double cell_size;
     if (!nh.param("cell_size", cell_size, 0.2))
-        ROS_WARN(" TMOVE : Param cell_size not found, set to 0.05");
+        ROS_WARN(" TMAIN : Param cell_size not found, set to 0.05");
     double inflation_radius;
     if (!nh.param("inflation_radius", inflation_radius, 0.2))
-        ROS_WARN(" TMOVE : Param inflation_radius not found, set to 0.3");
+        ROS_WARN(" TMAIN : Param inflation_radius not found, set to 0.3");
     int log_odds_thresh;
     if (!nh.param("log_odds_thresh", log_odds_thresh, 10))
-        ROS_WARN(" TMOVE : Param log_odds_thresh not found, set to 10");
+        ROS_WARN(" TMAIN : Param log_odds_thresh not found, set to 10");
     int log_odds_cap;
     if (!nh.param("log_odds_cap", log_odds_cap, 20))
-        ROS_WARN(" TMOVE : Param log_odds_cap not found, set to 20");
+        ROS_WARN(" TMAIN : Param log_odds_cap not found, set to 20");
     double main_iter_rate;
     if (!nh.param("main_iter_rate", main_iter_rate, 25.0))
-        ROS_WARN(" TMOVE : Param main_iter_rate not found, set to 25");
+        ROS_WARN(" TMAIN : Param main_iter_rate not found, set to 25");
     // print out the parameters
     ROS_INFO(" TMAIN : Goals[%s], Grid[%.2f,%.2f to %.2f,%.2f]  CloseEnuf:%f  TgtDt:%f  AvgSpd:%f  CellSize:%f  InfMskRad:%f  LOThrsh:%d  LOCap:%d",
              goal_str.c_str(), pos_min.x, pos_min.y, pos_max.x, pos_max.y, close_enough, target_dt, average_speed, cell_size, inflation_radius, log_odds_thresh, log_odds_cap);
@@ -155,9 +158,9 @@ int main(int argc, char **argv)
     // Other variables
     bool replan = true;
     std::vector<Position> path, post_process_path, trajectory;
-    int g = -1;                  // goal num
-    Position pos_goal = pos_rbt; // to trigger the reach goal
-    int t = 0;                   // target num
+    int g = 0;                    // goal num
+    Position pos_goal = goals[g]; // to trigger the reach goal
+    int t = 0;                    // target num
     Position pos_target;
 
     // wait for other nodes to load
@@ -165,7 +168,7 @@ int main(int argc, char **argv)
     while (ros::ok() && (ranges.empty() || ang_rbt == 10))
     {
         rate.sleep();
-        ros::spinOnce(); //update the topics
+        ros::spinOnce(); // update the topics
     }
 
     ROS_INFO(" TMAIN : ===== BEGIN =====");
@@ -188,7 +191,8 @@ int main(int argc, char **argv)
             replan = true;
             if (++g >= goals.size())
             {
-                ROS_INFO(" TMAIN : Last goal reached");
+                if (verbose)
+                    ROS_INFO(" TMAIN : Last goal reached");
                 break;
             }
             // there are goals remaining
@@ -206,7 +210,9 @@ int main(int argc, char **argv)
                 t = 0; // in case the close enough for target triggers. indices cannot be less than 0.
 
             pos_target = trajectory[t];
-            ROS_INFO(" TMAIN : Get next target (%f,%f)", pos_target.x, pos_target.y);
+
+            if (verbose)
+                ROS_INFO(" TMAIN : Get next target (%f,%f)", pos_target.x, pos_target.y);
 
             // publish to target topic
             msg_target.point.x = pos_target.x;
@@ -218,23 +224,29 @@ int main(int argc, char **argv)
         {
             if (grid.get_cell(pos_rbt) && grid.get_cell(pos_goal))
             {
-                ROS_INFO(" TMAIN : Request Path from [%.2f, %.2f] to Goal %d at [%.2f,%.2f]",
-                         pos_rbt.x, pos_rbt.y, g, pos_goal.x, pos_goal.y);
+                if (verbose)
+                    ROS_INFO(" TMAIN : Request Path from [%.2f, %.2f] to Goal %d at [%.2f,%.2f]",
+                             pos_rbt.x, pos_rbt.y, g, pos_goal.x, pos_goal.y);
                 // if the robot and goal are both on accessible cells of the grid
                 path = planner.get(pos_rbt, pos_goal); // original path
                 if (path.empty())
                 { // path cannot be found
-                    ROS_WARN(" TMAIN : No path found between robot and goal");
+                    if (verbose)
+                        ROS_WARN(" TMAIN : No path found between robot and goal");
                     // retry
                 }
                 else
                 { // path found
                     // get turning points after processing path
 
-                    ROS_INFO(" TMAIN : Begin Post Process");
+                    // path.size() == 1 means start == goal. There is currently no code to handle this case, which may lead to problems downstream (trajectory generation and post process). Try and handle it.
+
+                    if (verbose)
+                        ROS_INFO(" TMAIN : Begin Post Process");
                     post_process_path = post_process(path, grid);
 
-                    ROS_INFO(" TMAIN : Begin trajectory generation over all turning points");
+                    if (verbose)
+                        ROS_INFO(" TMAIN : Begin trajectory generation over all turning points");
                     // generate trajectory over all turning points
                     // doing the following manner results in the front of trajectory being the goal, and the back being close to the rbt position
                     trajectory.clear();
@@ -250,8 +262,8 @@ int main(int argc, char **argv)
                         }
                     }
 
-                    ROS_INFO(" TMAIN : Trajectory generation complete");
-
+                    if (verbose)
+                        ROS_INFO(" TMAIN : Trajectory generation complete");
 
                     // publish post processed path to path topic
                     msg_path.poses.clear();
