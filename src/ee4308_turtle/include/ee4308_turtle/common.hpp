@@ -23,4 +23,6 @@ double dist_euc(double src_x, double src_y, double tgt_x, double tgt_y);
 double heading(Position src, Position tgt); // overload
 double limit_angle(double angle);
 double headingFromQuat(geometry_msgs::PoseStamped &pose);
+double dampingCos(double error_value);
+double dampingQuadratic(double error_value); 
 #endif
