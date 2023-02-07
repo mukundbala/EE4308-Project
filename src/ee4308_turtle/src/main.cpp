@@ -42,12 +42,36 @@ int main(int argc, char **argv)
 
     // Get ROS parameters
     bool verbose;
+    bool tune_mode;
+    bool tune_lin;
+    bool tune_ang;
+
     if (!nh.param("verbose_main", verbose, true))
+    {
         ROS_WARN(" TMAIN : Param verbose_main not found, set to true");
+    }
+    if (!nh.param("tune_mode" , tune_mode , false))
+    {
+        ROS_WARN(" TMAIN : Param tune_mode not found, set to false");
+    }
+    if (!nh.param("tune_lin" , tune_lin , false))
+    {
+        ROS_WARN(" TMAIN : Param tune_lin not found, set to false");
+    }
+    if (!nh.param("tune_ang" , tune_ang , false))
+    {
+        ROS_WARN(" TMAIN : Param tune_ang not found, set to false");
+    }
     if (!nh.param("initial_x", pos_rbt.x, 0.))
+    {
         ROS_WARN(" TMAIN : Param initial_x not found, set to 0");
+    }
     if (!nh.param("initial_y", pos_rbt.y, 0.))
+    {
         ROS_WARN(" TMAIN : Param initial_x not found, set to 0");
+    }
+    
+    //tuning
     std::vector<Position> goals;
     std::string goal_str;
     if (nh.param("goals", goal_str, std::to_string(pos_rbt.x) + "," + std::to_string(pos_rbt.y)))
@@ -74,42 +98,101 @@ int main(int argc, char **argv)
         }
     }
     else
+    {
         ROS_WARN(" TMAIN : Param goal not found, set to %s", goal_str.c_str());
+    }
+        
     Position pos_min;
-    if (!nh.param("min_x", pos_min.x, -10.))
-        ROS_WARN(" TMAIN : Param min_x not found, set to -10");
-    if (!nh.param("min_y", pos_min.y, -10.))
-        ROS_WARN(" TMAIN : Param min_y not found, set to -10");
     Position pos_max;
-    if (!nh.param("max_x", pos_max.x, 10.))
-        ROS_WARN(" TMAIN : Param max_x not found, set to 10");
-    if (!nh.param("max_y", pos_max.y, 10.))
-        ROS_WARN(" TMAIN : Param max_y not found, set to 10");
     double close_enough;
-    if (!nh.param("close_enough", close_enough, 0.1))
-        ROS_WARN(" TMAIN : Param close_enough not found, set to 0.1");
     double target_dt;
-    if (!nh.param("target_dt", target_dt, 0.04))
-        ROS_WARN(" TMAIN : Param target_dt not found, set to 0.04");
     double average_speed;
-    if (!nh.param("average_speed", average_speed, 0.2))
-        ROS_WARN(" TMAIN : Param average_speed not found, set to 0.2");
     double cell_size;
-    if (!nh.param("cell_size", cell_size, 0.2))
-        ROS_WARN(" TMAIN : Param cell_size not found, set to 0.05");
     double inflation_radius;
-    if (!nh.param("inflation_radius", inflation_radius, 0.2))
-        ROS_WARN(" TMAIN : Param inflation_radius not found, set to 0.3");
     int log_odds_thresh;
-    if (!nh.param("log_odds_thresh", log_odds_thresh, 10))
-        ROS_WARN(" TMAIN : Param log_odds_thresh not found, set to 10");
     int log_odds_cap;
-    if (!nh.param("log_odds_cap", log_odds_cap, 20))
-        ROS_WARN(" TMAIN : Param log_odds_cap not found, set to 20");
     double main_iter_rate;
+    if (!nh.param("min_x", pos_min.x, -10.))
+    {
+        ROS_WARN(" TMAIN : Param min_x not found, set to -10");
+    }
+        
+    if (!nh.param("min_y", pos_min.y, -10.))
+    {
+        ROS_WARN(" TMAIN : Param min_y not found, set to -10");
+    }
+        
+    if (!nh.param("max_x", pos_max.x, 10.))
+    {
+        ROS_WARN(" TMAIN : Param max_x not found, set to 10");
+    }
+        
+    if (!nh.param("max_y", pos_max.y, 10.))
+    {
+        ROS_WARN(" TMAIN : Param max_y not found, set to 10");
+    }
+        
+    if (!nh.param("close_enough", close_enough, 0.1))
+    {
+        ROS_WARN(" TMAIN : Param close_enough not found, set to 0.1");
+    }
+        
+    if (!nh.param("target_dt", target_dt, 0.04))
+    {
+        ROS_WARN(" TMAIN : Param target_dt not found, set to 0.04");
+    }
+        
+    if (!nh.param("average_speed", average_speed, 0.2))
+    {
+        ROS_WARN(" TMAIN : Param average_speed not found, set to 0.2");
+    }
+        
+    if (!nh.param("cell_size", cell_size, 0.2))
+    {
+        ROS_WARN(" TMAIN : Param cell_size not found, set to 0.05");
+    }
+        
+    if (!nh.param("inflation_radius", inflation_radius, 0.2))
+    {
+        ROS_WARN(" TMAIN : Param inflation_radius not found, set to 0.3");
+    }
+        
+    if (!nh.param("log_odds_thresh", log_odds_thresh, 10))
+    {
+        ROS_WARN(" TMAIN : Param log_odds_thresh not found, set to 10");
+    }
+        
+    if (!nh.param("log_odds_cap", log_odds_cap, 20))
+    {
+        ROS_WARN(" TMAIN : Param log_odds_cap not found, set to 20");
+    }
+    
     if (!nh.param("main_iter_rate", main_iter_rate, 25.0))
+    {
         ROS_WARN(" TMAIN : Param main_iter_rate not found, set to 25");
-    // print out the parameters
+    }
+
+    if (tune_mode)
+    {
+        if (!tune_ang && !tune_lin)
+        {
+            ROS_ERROR("TMAIN: Tune mode set, but tune_ang or tune_lin not selected!");
+            ros::shutdown(); //we kill everything here
+            return 1; 
+        }
+        else if (tune_ang && tune_lin)
+        {
+            ROS_ERROR("TMAIN: TUne mode set, both tune_ang and tune_lin selected. Only one can be true");
+            ros::shutdown(); //we kill everything here
+            return 1;
+        }
+        else
+        {
+            target_dt = 10.0;
+            close_enough = 0.0;
+            ROS_INFO("TMAIN: Tuning params prepared");
+        }   
+    }
     ROS_INFO(" TMAIN : Goals[%s], Grid[%.2f,%.2f to %.2f,%.2f]  CloseEnuf:%f  TgtDt:%f  AvgSpd:%f  CellSize:%f  InfMskRad:%f  LOThrsh:%d  LOCap:%d",
              goal_str.c_str(), pos_min.x, pos_min.y, pos_max.x, pos_max.y, close_enough, target_dt, average_speed, cell_size, inflation_radius, log_odds_thresh, log_odds_cap);
 
@@ -157,10 +240,10 @@ int main(int argc, char **argv)
 
     // Other variables
     bool replan = true;
+    int g = 0; // goal num
+    int t = 0; // target num
     std::vector<Position> path, post_process_path, trajectory;
-    int g = 0;                    // goal num
     Position pos_goal = goals[g]; // to trigger the reach goal
-    int t = 0;                    // target num
     Position pos_target;
 
     // wait for other nodes to load
