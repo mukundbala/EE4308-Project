@@ -83,3 +83,14 @@ double headingFromQuat(geometry_msgs::PoseStamped &pose)
     double heading = atan2(siny_cosp, cosy_cosp);
     return heading; //atan2 constrains this
 }
+
+double dampingCos(double error_value)
+{
+    return cos(error_value);
+}
+
+double dampingQuadratic(double error_value)
+{
+    double value = (-1 / (0.25 * M_PI * M_PI)) * (error_value - M_PI) * (error_value + M_PI);
+    return value;
+}
