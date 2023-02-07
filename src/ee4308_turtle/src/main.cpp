@@ -186,12 +186,9 @@ int main(int argc, char **argv)
             ros::shutdown(); //we kill everything here
             return 1;
         }
-        else
-        {
-            target_dt = 10.0;
-            close_enough = 0.0;
-            ROS_INFO("TMAIN: Tuning params prepared");
-        }   
+        target_dt = 10.0;
+        close_enough = 0.0;
+        ROS_INFO("TMAIN: Tuning params prepared"); 
     }
     ROS_INFO(" TMAIN : Goals[%s], Grid[%.2f,%.2f to %.2f,%.2f]  CloseEnuf:%f  TgtDt:%f  AvgSpd:%f  CellSize:%f  InfMskRad:%f  LOThrsh:%d  LOCap:%d",
              goal_str.c_str(), pos_min.x, pos_min.y, pos_max.x, pos_max.y, close_enough, target_dt, average_speed, cell_size, inflation_radius, log_odds_thresh, log_odds_cap);
