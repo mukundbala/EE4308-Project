@@ -8,23 +8,30 @@
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Empty.h>
 #include "common.hpp"
+#define INF 100000
 
 bool target_changed = false;
-Position target_pos;
-Position robot_pos(0, 0);
+Position target_position(INF,INF);
+Position robot_position(0, 0);
+bool received_target_position = false;
 double robot_angle = 10; // set to 10, because ang_rbt is between -pi and pi, and integer for correct comparison while waiting for motion to load
-
-//Callbacks
 void cbTarget(const geometry_msgs::PointStamped::ConstPtr &msg)
 {
-    target_pos.x = msg->point.x;
-    target_pos.y = msg->point.y;
+    target_position.x = msg->point.x;
+    target_position.y = msg->point.y;
+    received_target_position = true;
+    if (received_target_position)
+    {
+        ROS_INFO("TMOVE: Received Target");
+    }
+    ROS_INFO_STREAM("TMOVE: Target Coordinates Received: (" << target_position.x << "," << target_position.y<<")");
 }
+
 void cbPose(const geometry_msgs::PoseStamped::ConstPtr &msg)
 {
     auto &p = msg->pose.position;
-    robot_pos.x = p.x;
-    robot_pos.y = p.y;
+    robot_position.x = p.x;
+    robot_position.y = p.y;
 
     // euler yaw (ang_rbt) from quaternion <-- stolen from wikipedia
     auto &q = msg->pose.orientation; // reference is always faster than copying. but changing it means changing the referenced object.
@@ -41,27 +48,28 @@ int main(int argc, char **argv)
     // Get ROS Parameters
     bool enable_move;
     bool verbose;
-
+    
     double Kp_lin;
     double Ki_lin;
     double Kd_lin;
     double max_lin_vel;
     double max_lin_acc;
-
+    
     double Kp_ang;
     double Ki_ang;
     double Kd_ang;
     double max_ang_vel;
     double max_ang_acc;
-    double move_iter_rate;
     
+    double move_iter_rate;
+
     bool tune_mode;
     bool tune_lin;
     bool tune_ang;
 
     std::string coupling_function_name;
     std::function<double(double)>coupling_func;
-    //param loader
+
     if (!nh.param("enable_move", enable_move, true))
     {
         ROS_WARN(" TMOVE : Param enable_move not found, set to true");
@@ -147,7 +155,6 @@ int main(int argc, char **argv)
         ROS_WARN(" TMOVE: Param tune_ang not found, set to false");
     }
 
-    
     // Subscribers
     ros::Subscriber sub_target = nh.subscribe("target", 1, &cbTarget);
     ros::Subscriber sub_pose = nh.subscribe("pose", 1, &cbPose);
@@ -176,10 +183,24 @@ int main(int argc, char **argv)
     {
         coupling_func = dampingCos;
     }
-    
+
+    if (!tune_mode) //just a safeguard in case we forget (see turtle.yaml)
+    {
+        tune_lin = false;
+        tune_ang = false; 
+    }
+    else
+    {
+        if ((!tune_lin && !tune_ang) || (tune_ang && tune_lin))
+        {
+            ROS_INFO("Both tune_ang and tune_lin cannot have the same boolean value. Setting tune_mode to false!");
+            tune_mode = false;
+        }
+    }
     // wait for other nodes to load
     ROS_INFO(" TMOVE : Waiting for topics");
-    while (ros::ok() && nh.param("run", true) && robot_angle == 10) // not dependent on main.cpp, but on motion.cpp
+    // we keep pinging the topic until we have received robot pos and target pos.
+    while (ros::ok() && nh.param("run", true) && robot_angle == 10 && robot_position.x == INF)
     {
         rate.sleep();
         ros::spinOnce(); //update the topics
@@ -197,6 +218,7 @@ int main(int argc, char **argv)
     double cumulative_angular_error = 0.0;
 
     ////////////////// DECLARE VARIABLES HERE //////////////////
+
     ROS_INFO(" TMOVE : ===== BEGIN =====");
 
     // main loop
@@ -208,44 +230,59 @@ int main(int argc, char **argv)
             ros::spinOnce();
 
             dt = ros::Time::now().toSec() - prev_time;
-            if (dt == 0) // ros doesn't tick the time fast enough
+            if (dt == 0 || robot_angle == 10 || target_position.x == INF) // ros doesn't tick the time fast enough.
+            {
                 continue;
+            }
             prev_time += dt;
 
             ////////////////// MOTION CONTROLLER HERE //////////////////
-            //the reason for defining tuning mode and NOT tuning mode is because all post processing like coupling and saturation should be turned off
             if (tune_mode)
             {
-                double curr_linear_error = dist_euc(robot_pos , target_pos); //the current euclidean error between robot_pos and target_pos
+                ROS_INFO("[Move:] In Tune Mode");
+                ROS_INFO_STREAM("[Move:] : Target Pos: (" << target_position.x << "," << target_position.y<<")");
+                ROS_INFO_STREAM("[Move:] : Robot Pose: (" << robot_position.x << "," << robot_position.y<<","<<robot_angle <<")");
+                double curr_linear_error = target_position.x - robot_position.x; //the current euclidean error between robot_pos and target_pos only in the x dir for tuning
                 cumulative_linear_error += (curr_linear_error * dt); //update cumulative error
                 double p_cmd_lin = curr_linear_error * Kp_lin; //proportional gain
                 double i_cmd_lin = cumulative_linear_error * Ki_lin; //integral gain
                 double d_cmd_lin = (curr_linear_error - prev_linear_error) / dt; //derivative gain
-                cmd_lin_vel = (tune_lin && !tune_ang) ? (p_cmd_lin + i_cmd_lin + d_cmd_lin) : 0.0; //if tune_lin is true and tune_ang is false, this will be non-zero.
+                cmd_lin_vel = p_cmd_lin + i_cmd_lin + d_cmd_lin;
 
-                double curr_angular_error = atan2(target_pos.y - robot_pos.y , target_pos.x - robot_pos.x); //angular error
+                ROS_INFO_STREAM("Goal heading: " <<atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) << " Robot Heading: " << robot_angle);
+                double curr_angular_error = atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) - robot_angle; //angular error
                 cumulative_angular_error += (curr_angular_error * dt); //update cumulative error
                 double p_cmd_ang = curr_angular_error * Kp_ang; //proportional gail
                 double i_cmd_ang = cumulative_angular_error * Ki_ang; //integral gain
                 double d_cmd_ang = (curr_angular_error - prev_angular_error) / dt; //derivative gain
-                cmd_ang_vel = (tune_ang && !tune_lin) ? (p_cmd_ang + i_cmd_ang + d_cmd_ang) : 0.0; //if tune_ang is true and tune_lin is false, this will be non-zero.
+                cmd_ang_vel = p_cmd_ang + i_cmd_ang + d_cmd_ang;
+                ROS_INFO_STREAM("[Move:] : Linear Error:" << curr_linear_error << " " << "Angular Error: " << curr_angular_error);
+                if (tune_lin)
+                {
+                    cmd_ang_vel = 0; //we only tune linear velocity here
+                }
 
+                if (tune_ang)
+                {
+                    cmd_lin_vel = 0; //we only tune angular velocity here
+                }
+                ROS_INFO_STREAM("[Move:] Cmd Lin Vel:" << cmd_lin_vel);
+                ROS_INFO_STREAM("[Move:] Cmd Ang Vel:" << cmd_ang_vel);
                 //update previous store
                 prev_linear_error = curr_linear_error;
                 prev_angular_error = curr_angular_error;
             }
-            
             //coupling --> velocity damping from coupling --> constrain linear vel --> constrain angular vel
             else
             {
-                double curr_linear_error = dist_euc(robot_pos , target_pos); //compute euclidean distance between robot and target pos
+                double curr_linear_error = dist_euc(robot_position , target_position); //compute euclidean distance between robot and target pos
                 cumulative_linear_error += (curr_linear_error * dt); //update cumulative linear error
                 double p_cmd_lin = curr_linear_error * Kp_lin; //lin_vel proprotional gain
                 double i_cmd_lin = cumulative_linear_error * Ki_lin; //lin_vel integral gain
                 double d_cmd_lin = (curr_linear_error - prev_linear_error) / dt; //lin_vel derivative gain
                 double raw_cmd_lin = p_cmd_lin + i_cmd_lin + d_cmd_lin; //the raw cmd_lin before any post processing
 
-                double curr_angular_error = atan2(target_pos.y - robot_pos.y , target_pos.x - robot_pos.x); //the current angular error
+                double curr_angular_error = atan2(target_position.y - robot_position.y , target_position.x - robot_position.x); //the current angular error
                 if (fabs(curr_angular_error) > M_PI / 2) //this ensures that all curr_angular error is strictly between +pi/2 and -pi/2
                 {
                     raw_cmd_lin *= -1; //we are going to reverse to hit the target that is behind the robot aka in the 3rd and 4th quadrant of robot frame
@@ -278,6 +315,7 @@ int main(int argc, char **argv)
             msg_cmd.linear.x = cmd_lin_vel;
             msg_cmd.angular.z = cmd_ang_vel;
             pub_cmd.publish(msg_cmd);
+
             // verbose
             if (verbose)
             {
