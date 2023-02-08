@@ -8,23 +8,17 @@
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Empty.h>
 #include "common.hpp"
-#define INF 100000
 
+const double INF = 5000;
 bool target_changed = false;
-Position target_position(INF,INF);
+Position target_position(INF,INF); //initialized as INF
 Position robot_position(0, 0);
-bool received_target_position = false;
 double robot_angle = 10; // set to 10, because ang_rbt is between -pi and pi, and integer for correct comparison while waiting for motion to load
 void cbTarget(const geometry_msgs::PointStamped::ConstPtr &msg)
 {
     target_position.x = msg->point.x;
     target_position.y = msg->point.y;
-    received_target_position = true;
-    if (received_target_position)
-    {
-        ROS_INFO("TMOVE: Received Target");
-    }
-    ROS_INFO_STREAM("TMOVE: Target Coordinates Received: (" << target_position.x << "," << target_position.y<<")");
+    ROS_INFO_STREAM("TMOVE: Target Coordinates Received: (" << msg->point.x << "," << msg->point.x<<")");
 }
 
 void cbPose(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -199,8 +193,9 @@ int main(int argc, char **argv)
     }
     // wait for other nodes to load
     ROS_INFO(" TMOVE : Waiting for topics");
-    // we keep pinging the topic until we have received robot pos and target pos.
-    while (ros::ok() && nh.param("run", true) && robot_angle == 10 && robot_position.x == INF)
+    // we keep pinging the topic until we have received robot pos and target pos. 
+    //Not doing this, especially for robot_angle and target_position causes yaw to go crazy. Overall just more appropriate to wait for the first target to get published
+    while (ros::ok() && nh.param("run", true) && (robot_angle == 10 || (target_position.x == INF))) 
     {
         rate.sleep();
         ros::spinOnce(); //update the topics
@@ -230,7 +225,7 @@ int main(int argc, char **argv)
             ros::spinOnce();
 
             dt = ros::Time::now().toSec() - prev_time;
-            if (dt == 0 || robot_angle == 10 || target_position.x == INF) // ros doesn't tick the time fast enough.
+            if (dt == 0) // ros doesn't tick the time fast enough.robot_angle == 10 || target_position.x == INF
             {
                 continue;
             }
@@ -249,7 +244,7 @@ int main(int argc, char **argv)
                 double d_cmd_lin = (curr_linear_error - prev_linear_error) / dt; //derivative gain
                 cmd_lin_vel = p_cmd_lin + i_cmd_lin + d_cmd_lin;
 
-                ROS_INFO_STREAM("Goal heading: " <<atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) << " Robot Heading: " << robot_angle);
+                ROS_INFO_STREAM("Goal heading: " << atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) << " Robot Heading: " << robot_angle);
                 double curr_angular_error = atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) - robot_angle; //angular error
                 cumulative_angular_error += (curr_angular_error * dt); //update cumulative error
                 double p_cmd_ang = curr_angular_error * Kp_ang; //proportional gail
