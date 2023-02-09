@@ -234,24 +234,30 @@ int main(int argc, char **argv)
             ////////////////// MOTION CONTROLLER HERE //////////////////
             if (tune_mode)
             {
-                ROS_INFO("[Move:] In Tune Mode");
-                ROS_INFO_STREAM("[Move:] : Target Pos: (" << target_position.x << "," << target_position.y<<")");
-                ROS_INFO_STREAM("[Move:] : Robot Pose: (" << robot_position.x << "," << robot_position.y<<","<<robot_angle <<")");
+                ROS_INFO("[Move:] In Controller Tuning Mode");
+                ROS_INFO_STREAM("[Move]: Target Pos: (" << target_position.x << "," << target_position.y<<")");
+                ROS_INFO_STREAM("[Move]: Robot Position: (" << robot_position.x << "," << robot_position.y<<")");
+
                 double curr_linear_error = target_position.x - robot_position.x; //the current euclidean error between robot_pos and target_pos only in the x dir for tuning
                 cumulative_linear_error += (curr_linear_error * dt); //update cumulative error
+                //linear gains
                 double p_cmd_lin = curr_linear_error * Kp_lin; //proportional gain
                 double i_cmd_lin = cumulative_linear_error * Ki_lin; //integral gain
-                double d_cmd_lin = (curr_linear_error - prev_linear_error) / dt; //derivative gain
-                cmd_lin_vel = p_cmd_lin + i_cmd_lin + d_cmd_lin;
+                double d_cmd_lin = Kd_lin * (curr_linear_error - prev_linear_error) / dt; //derivative gain
+                cmd_lin_vel = p_cmd_lin + i_cmd_lin + d_cmd_lin; //command vel for linear
 
-                ROS_INFO_STREAM("Goal heading: " << atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) << " Robot Heading: " << robot_angle);
+                ROS_INFO_STREAM("[Move]: Target heading wrt Robot position: " << atan2(target_position.y - robot_position.y , target_position.x - robot_position.x));
+                ROS_INFO_STREAM("[Move]: Robot Heading: " << robot_angle);
+                //angular gains
                 double curr_angular_error = atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) - robot_angle; //angular error
                 cumulative_angular_error += (curr_angular_error * dt); //update cumulative error
+                
                 double p_cmd_ang = curr_angular_error * Kp_ang; //proportional gail
                 double i_cmd_ang = cumulative_angular_error * Ki_ang; //integral gain
-                double d_cmd_ang = (curr_angular_error - prev_angular_error) / dt; //derivative gain
-                cmd_ang_vel = p_cmd_ang + i_cmd_ang + d_cmd_ang;
-                ROS_INFO_STREAM("[Move:] : Linear Error:" << curr_linear_error << " " << "Angular Error: " << curr_angular_error);
+                double d_cmd_ang = Kd_ang * (curr_angular_error - prev_angular_error) / dt; //derivative gain
+                cmd_ang_vel = p_cmd_ang + i_cmd_ang + d_cmd_ang; //command vel for angular
+                
+                ROS_INFO_STREAM("[Move]: Linear Error: " << curr_linear_error << " " << "Angular Error: " << curr_angular_error);
                 if (tune_lin)
                 {
                     cmd_ang_vel = 0; //we only tune linear velocity here
@@ -263,6 +269,7 @@ int main(int argc, char **argv)
                 }
                 ROS_INFO_STREAM("[Move:] Cmd Lin Vel:" << cmd_lin_vel);
                 ROS_INFO_STREAM("[Move:] Cmd Ang Vel:" << cmd_ang_vel);
+                
                 //update previous store
                 prev_linear_error = curr_linear_error;
                 prev_angular_error = curr_angular_error;
@@ -270,14 +277,19 @@ int main(int argc, char **argv)
             //coupling --> velocity damping from coupling --> constrain linear vel --> constrain angular vel
             else
             {
-                double curr_linear_error = dist_euc(robot_position , target_position); //compute euclidean distance between robot and target pos
+                ROS_INFO("[Move]: In Controller Run Mode");
+                ROS_INFO_STREAM("[Move]: Target Pos: (" << target_position.x << "," << target_position.y<<")");
+                ROS_INFO_STREAM("[Move]: Robot Position: (" << robot_position.x << "," << robot_position.y<<")");
+
+                double curr_linear_error = dist_euc(robot_position , target_position); //compute euclidean distance between robot and target pos. Alaways +ve
                 cumulative_linear_error += (curr_linear_error * dt); //update cumulative linear error
+                
                 double p_cmd_lin = curr_linear_error * Kp_lin; //lin_vel proprotional gain
                 double i_cmd_lin = cumulative_linear_error * Ki_lin; //lin_vel integral gain
-                double d_cmd_lin = (curr_linear_error - prev_linear_error) / dt; //lin_vel derivative gain
+                double d_cmd_lin = Kd_lin * (curr_linear_error - prev_linear_error) / dt; //lin_vel derivative gain
                 double raw_cmd_lin = p_cmd_lin + i_cmd_lin + d_cmd_lin; //the raw cmd_lin before any post processing
 
-                double curr_angular_error = atan2(target_position.y - robot_position.y , target_position.x - robot_position.x); //the current angular error
+                double curr_angular_error = atan2(target_position.y - robot_position.y , target_position.x - robot_position.x) - robot_angle; //the current angular error
                 if (fabs(curr_angular_error) > M_PI / 2) //this ensures that all curr_angular error is strictly between +pi/2 and -pi/2
                 {
                     raw_cmd_lin *= -1; //we are going to reverse to hit the target that is behind the robot aka in the 3rd and 4th quadrant of robot frame
@@ -285,8 +297,8 @@ int main(int argc, char **argv)
                 }
                 cumulative_angular_error += (curr_angular_error * dt); //update cumulative angular error
                 double p_cmd_ang = curr_angular_error * Kp_ang; //ang_cmd proportional gain
-                double i_cmd_ang = cumulative_angular_error * Ki_lin; //ang_cmd integral gain
-                double d_cmd_ang = (curr_angular_error - prev_angular_error) / dt; //ang_cmd derivative gain
+                double i_cmd_ang = cumulative_angular_error * Ki_ang; //ang_cmd integral gain
+                double d_cmd_ang = Kd_ang * (curr_angular_error - prev_angular_error) / dt; //ang_cmd derivative gain
                 double raw_cmd_ang = p_cmd_ang + i_cmd_ang + d_cmd_ang; //the raw cmd_ang signal
                 
                 double damping_coeff = coupling_func(curr_angular_error); //use the coupling function initialised from before
